@@ -1,0 +1,21 @@
+[[source]]
+url = "https://pypi.org/simple"
+verify_ssl = true
+name = "pypi"
+
+[packages]
+numpy = "*"
+scipy = "*"
+matplotlib = "*"
+scikit-learn = "*"
+pytest = "*"
+xarray = "*"
+tqdm = "*"
+
+[dev-packages]
+autopep8 = "*"
+black = "*"
+ipykernel = "*"
+
+[requires]
+python_version = "3.8"
