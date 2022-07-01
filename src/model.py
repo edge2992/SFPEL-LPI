@@ -42,7 +42,6 @@ class LPI(BaseEstimator, ClassifierMixin):
         Xs = [x.T for x in Xs]
         self.Gs_, self.alpha_, e1ds = prepare_fit_binary(Xs, ml, c)
 
-        Gs_old = zeros_like_numpy_list(self.Gs_)
         As = zeros_like_numpy_list(self.Gs_)
         As_pos = zeros_like_numpy_list(self.Gs_)
         As_neg = zeros_like_numpy_list(self.Gs_)
@@ -50,25 +49,46 @@ class LPI(BaseEstimator, ClassifierMixin):
         Bs_pos = zeros_like_numpy_list(self.Gs_)
         Bs_neg = zeros_like_numpy_list(self.Gs_)
 
-        L = np.zeros((n, n))
-        for i in range(ml):
-            L += self.alpha_[i, 0] ** self.gam * Ls[i]
-        for t in range(self.max_iter):
+        def calc_L(Ls, alpha, gam):
+            L = np.zeros_like(Ls[0])
+            for alp, l in zip(alpha, Ls):
+                L += alp**gam * l
+            return L
+
+        def calc_Q(y, mu, Xs, Gs):
             Q = y.astype("float64")
-            for i in range(mx):
-                Gs_old[i] = self.Gs_[i].copy()
-                Q += self.mu * Xs[i].T @ self.Gs_[i]
+            for x, g in zip(Xs, Gs):
+                Q += mu * x.T @ g
+            return Q
+
+        def separate_positive(A):
+            return (np.abs(A) + A) / 2
+
+        def separate_negative(A):
+            return (np.abs(A) - A) / 2
+
+        def calc_A(x, mu, n, P, lam, e1ds):
+            M = mu * np.diag(np.ones(n)) - mu**2 * P.T
+            A = x @ M @ x.T + lam * (e1ds @ e1ds.T)
+            return A
+
+        for t in range(self.max_iter):
+            Gs_old = [g.copy() for g in self.Gs_]
+            L = calc_L(Ls, self.alpha_, self.gam)
+            Q = calc_Q(y, self.mu, Xs, self.Gs_)
             P = np.linalg.inv(L + (1 + mx * self.mu) * np.diag(np.ones(n)))
             self.Fmat_ = P @ Q
             for i in range(mx):
                 # fmt: off
                 # TODO: XとX.Tに挟まれた部分が不明
-                As[i] = Xs[i] @ (self.mu * np.diag(np.ones(n)) - self.mu**2 * P.T) @ Xs[i].T + \
-                    self.lam * (e1ds[i] @ e1ds[i].T)
+                As[i] = calc_A(Xs[i], self.mu, n, P, self.lam, e1ds[i])
+                # As[i] = Xs[i] @ (self.mu * np.diag(np.ones(n)) - self.mu**2 * P.T) @ Xs[i].T + \
+                #     self.lam * (e1ds[i] @ e1ds[i].T)
                 # fmt: on
 
                 As_pos[i] = (np.abs(As[i]) + As[i]) / 2
                 As_neg[i] = (np.abs(As[i]) - As[i]) / 2
+            for i in range(mx):
                 Bs[i] = self.mu * Xs[i] @ P @ y
                 for j in range(mx):
                     if i == j:
@@ -86,11 +106,6 @@ class LPI(BaseEstimator, ClassifierMixin):
                 self.alpha_[i, 0] = (1 / np.sum(np.diag((self.Fmat_.T @ Ls[i] @ self.Fmat_)))) ** (1.0 / (self.gam - 1.0))
             # fmt: on
             self.alpha_ = self.alpha_ / np.sum(self.alpha_)
-
-            # 次の準備
-            L = np.zeros((n, n))
-            for i in range(ml):
-                L += self.alpha_[i, 0] ** self.gam * Ls[i]
 
             # diff_Gを計算する
             diff_G = np.zeros((mx, 1))
