@@ -28,13 +28,18 @@ class LPI(BaseEstimator, ClassifierMixin):
         # fitの後に値が確定する変数はコンストラクタに書かず、
         # fitの中でsaffixに_を付けて宣言する
         Xs = X.copy()
+
+        def prepare_Ls(Xs):
+            train_lncRNA_simi = []
+            for x in Xs:
+                train_lncRNA_simi.append(fast_LNC_calculate(x, x.shape[0]))
+            Ls = []
+            for simi in train_lncRNA_simi:
+                Ls.append(np.eye(simi.shape[0]) - simi)
+            return Ls
+
         # similalityの計算
-        train_lncRNA_simi = []
-        for x in Xs:
-            train_lncRNA_simi.append(fast_LNC_calculate(x, x.shape[0]))
-        Ls = []
-        for simi in train_lncRNA_simi:
-            Ls.append(np.eye(simi.shape[0]) - simi)
+        Ls = prepare_Ls(Xs)
 
         n, c = y.shape
         mx = len(Xs)
@@ -93,6 +98,23 @@ class LPI(BaseEstimator, ClassifierMixin):
                 )
             return Gs
 
+        def update_alpha(Fmat, Ls, gam):
+            ml = len(Ls)
+            alpha = np.zeros((ml, 1))
+            for i in range(ml):
+                alpha[i, 0] = (1 / np.sum(np.diag((Fmat.T @ Ls[i] @ Fmat)))) ** (
+                    1.0 / (gam - 1.0)
+                )
+            return alpha / np.sum(alpha)
+
+        def calc_diffG(Gs_new, Gs_old):
+            diff_G = np.zeros((len(Gs_new), 1))
+            for i in range(len(Gs_new)):
+                diff_G[i, 0] = np.linalg.norm(
+                    Gs_new[i] - Gs_old[i], "fro"
+                ) / np.linalg.norm(Gs_old[i], "fro")
+            return np.mean(diff_G)
+
         for t in range(self.max_iter):
             Gs_old = [g.copy() for g in self.Gs_]
             L = calc_L(Ls, self.alpha_, self.gam)
@@ -100,21 +122,9 @@ class LPI(BaseEstimator, ClassifierMixin):
             P = np.linalg.inv(L + (1 + mx * self.mu) * np.diag(np.ones(n)))
             self.Fmat_ = P @ Q
             self.Gs_ = update_G(Xs, self.mu, P, self.lam, mx, self.Gs_, e1ds)
-
-            for i in range(ml):
-                self.alpha_[i, 0] = (
-                    1 / np.sum(np.diag((self.Fmat_.T @ Ls[i] @ self.Fmat_)))
-                ) ** (1.0 / (self.gam - 1.0))
-            # fmt: on
-            self.alpha_ = self.alpha_ / np.sum(self.alpha_)
-
-            # diff_Gを計算する
-            diff_G = np.zeros((mx, 1))
-            for i in range(mx):
-                diff_G[i, 0] = np.linalg.norm(
-                    self.Gs_[i] - Gs_old[i], "fro"
-                ) / np.linalg.norm(Gs_old[i], "fro")
-            if np.mean(diff_G) < self.eps:
+            self.alpha_ = update_alpha(self.Fmat_, Ls, self.gam)
+            diff_G = calc_diffG(self.Gs_, Gs_old)
+            if diff_G < self.eps:
                 # 学習を終了させる
                 return self
 
@@ -124,7 +134,7 @@ class LPI(BaseEstimator, ClassifierMixin):
             print(
                 "epoch {}, diffG: {:.3f}, auc: {:.3f}".format(
                     t,
-                    np.mean(diff_G),
+                    diff_G,
                     auc(fpr, tpr),
                 )
             )
