@@ -2,8 +2,8 @@ from sklearn.metrics import (
     accuracy_score,
     auc,
     average_precision_score,
-    f1_score,
-    precision_score,
+    confusion_matrix,
+    precision_recall_curve,
     roc_auc_score,
     roc_curve,
 )
@@ -19,7 +19,7 @@ def cross_validation(seed=1, CV=5):
     interaction_matrix = data.InteractionMatrix
     row = interaction_matrix.shape[0]
     CV_matrix = np.ceil(np.random.rand(row) * CV)
-    result = np.zeros((1, 7))
+    result = np.zeros(7)
 
     for cv in range(1, CV + 1):
         train_index = np.where(CV_matrix != cv)[0]
@@ -52,35 +52,47 @@ def cross_validation(seed=1, CV=5):
         aupr = average_precision_score(real_score, predict_score)
         auc_score = roc_auc_score(real_score, predict_score)
         print("aupr: {}, auc: {}".format(aupr, auc_score))
-        # plotting
-        fpr = {}
-        tpr = {}
-        roc_auc = {}
-        fpr["micro"], tpr["micro"], _ = roc_curve(real_score, predict_score)
-        roc_auc["micro"] = auc(fpr["micro"], tpr["micro"])
-
-        plt.figure()
-        plt.plot(
-            fpr["micro"],
-            tpr["micro"],
-            label="ROC curve (area= %0.2f)" % roc_auc["micro"],
+        [sen, spec, precision, accuracy, f1] = evaluation_metric(
+            real_score, predict_score
         )
-        plt.legend()
-        plt.show()
-        # [sen, spec, precision, accuracy, f1] = evaluation_metric(
-        #     real_score, predict_score
-        # )
-        # result += [aupr, auc, sen, spec, precision, accuracy, f1]
+        result += np.array([aupr, auc_score, sen, spec, precision, accuracy, f1])
+        # plot_ROC(real_score, predict_score)
     return result / CV
 
 
-def evaluation_metric(interaction_score, predict_score):
-    # TODO: senとspecを実装する
-    sen = 0
-    spec = 0
-    precision = precision_score(interaction_score, predict_score)
-    accuracy = accuracy_score(interaction_score, predict_score)
-    f1 = f1_score(interaction_score, predict_score)
+def plot_ROC(y_true, y_score):
+    fpr, tpr, _ = roc_curve(y_true, y_score)
+    roc_auc = auc(fpr, tpr)
+    plt.figure()
+    plt.plot(
+        fpr,
+        tpr,
+        label="ROC curve (area= %0.2f)" % roc_auc,
+    )
+    plt.legend()
+    plt.show()
+
+
+def evaluation_metric(y_ture, y_score):
+    # f1 scoreが一番高いthresholdを選び、評価をする
+    precisions, recalls, thresholds = precision_recall_curve(y_ture, y_score)
+    fscore = (2 * precisions * recalls) / (precisions + recalls + 1e-20)
+
+    ix = np.argmax(fscore)
+    y_pred = y_score >= thresholds[ix]
+    tn, fp, fn, tp = confusion_matrix(y_ture, y_pred).ravel()
+
+    accuracy = accuracy_score(y_ture, y_pred)
+    precision = precisions[ix]
+    f1 = fscore[ix]
+    sen = recalls[ix]
+    spec = tn / (tn + fp)
+
+    print(
+        "sensitivity: {:.3f}, specificity: {:.3f}, precision: {:.3f}, accuracy: {:.3f}, f1: {:.3f}".format(
+            sen, spec, precision, accuracy, f1
+        )
+    )
     return (sen, spec, precision, accuracy, f1)
 
 
@@ -94,8 +106,7 @@ def LPI_pred(Xs, train_interaction_matrix, train_lncRNA_simi, test_X):
     simi_num = len(train_lncRNA_simi)
     Ls = []
     for i in range(simi_num):
-        # TODO: なにを計算してる？　グラフラプラシアンっぽい？
-        # TODO: Dの値がWのrow sumではなく1となっている?
+        # TODO: Dの値がWのrow sumではなく1となっている
         Ls.append(np.eye(train_lncRNA_simi[i].shape[0]) - train_lncRNA_simi[i])
     mx = len(Xs)
     ml = len(Ls)
@@ -165,7 +176,6 @@ def lpi(Xs, Ls, Y, mx, ml, mu, lam, gam, max_iter, eps):
         # fmt: off
         for i in range(mx):
             Gs[i] = Gs[i] * np.sqrt((Bs_pos[i] + As_neg[i] @ Gs[i]) / (Bs_neg[i] + As_pos[i] @ Gs[i]))
-            # Gs[i] = Gs[i] * np.sqrt((Bs_neg[i] + As_pos[i] @ Gs[i]) / (Bs_pos[i] + As_neg[i] @ Gs[i] + 1e-20))
 
         for i in range(ml):
             alpha[i, 0] = (1 / np.sum(np.diag((F_mat.T @ Ls[i] @ F_mat)))) ** (1.0 / (gam - 1.0))
@@ -210,4 +220,16 @@ def calc_loss(Gs, F_mat, Y, Xs, Ls, mx, ml, mu, lam, gam, alpha):
 
 
 if __name__ == "__main__":
-    cross_validation()
+    result = cross_validation()
+    print(
+        """average_precision_score: {:.3f}, AUC_score: {:.3f}, sensitivity: {:.3f},
+        specificity: {:.3f}, precision: {:.3f}, accuracy: {:.3f}, f1: {:.3f}""".format(
+            result[0],
+            result[1],
+            result[2],
+            result[3],
+            result[4],
+            result[5],
+            result[6],
+        )
+    )
