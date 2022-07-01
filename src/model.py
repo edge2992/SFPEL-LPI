@@ -63,15 +63,16 @@ class LPI(BaseEstimator, ClassifierMixin):
         def separate_mat(A):
             return separate_positive(A), separate_negative(A)
 
-        def calc_A(x, mu, n, P, lam, e1ds):
+        def calc_A(x, P, e1ds, mu, lam):
             # Mが不明
+            n = P.shape[0]
             M = mu * np.diag(np.ones(n)) - mu**2 * P.T
             A = x @ M @ x.T + lam * (e1ds @ e1ds.T)
             return A
 
-        def calc_B(i, mu, mx, Xs, P, y, Gs):
+        def calc_B(Xs, i, y, P, Gs, mu):
             B = mu * Xs[i] @ P @ y
-            for j in range(mx):
+            for j in range(len(Xs)):
                 if i == j:
                     # なぜ場合分けが必要なのか
                     continue
@@ -80,10 +81,10 @@ class LPI(BaseEstimator, ClassifierMixin):
                     B += mu**2 * Xs[i] @ P.T @ Rj
             return B
 
-        def update_G(Xs, mu, n, P, lam, mx, Gs, e1ds):
+        def update_G(Xs, mu, P, lam, mx, Gs, e1ds):
             for i in range(mx):
-                A = calc_A(Xs[i], mu, n, P, lam, e1ds[i])
-                B = calc_B(i, mu, mx, Xs, P, y, Gs)
+                A = calc_A(Xs[i], P, e1ds[i], mu, lam)
+                B = calc_B(Xs, i, y, P, Gs, mu)
                 A_pos, A_neg = separate_mat(A)
                 B_pos, B_neg = separate_mat(B)
 
@@ -98,8 +99,7 @@ class LPI(BaseEstimator, ClassifierMixin):
             Q = calc_Q(y, self.mu, Xs, self.Gs_)
             P = np.linalg.inv(L + (1 + mx * self.mu) * np.diag(np.ones(n)))
             self.Fmat_ = P @ Q
-
-            self.Gs_ = update_G(Xs, self.mu, n, P, self.lam, mx, self.Gs_, e1ds)
+            self.Gs_ = update_G(Xs, self.mu, P, self.lam, mx, self.Gs_, e1ds)
 
             for i in range(ml):
                 self.alpha_[i, 0] = (
