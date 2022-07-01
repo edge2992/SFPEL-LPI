@@ -42,13 +42,6 @@ class LPI(BaseEstimator, ClassifierMixin):
         Xs = [x.T for x in Xs]
         self.Gs_, self.alpha_, e1ds = prepare_fit_binary(Xs, ml, c)
 
-        As = zeros_like_numpy_list(self.Gs_)
-        As_pos = zeros_like_numpy_list(self.Gs_)
-        As_neg = zeros_like_numpy_list(self.Gs_)
-        Bs = zeros_like_numpy_list(self.Gs_)
-        Bs_pos = zeros_like_numpy_list(self.Gs_)
-        Bs_neg = zeros_like_numpy_list(self.Gs_)
-
         def calc_L(Ls, alpha, gam):
             L = np.zeros_like(Ls[0])
             for alp, l in zip(alpha, Ls):
@@ -67,10 +60,37 @@ class LPI(BaseEstimator, ClassifierMixin):
         def separate_negative(A):
             return (np.abs(A) - A) / 2
 
+        def separate_mat(A):
+            return separate_positive(A), separate_negative(A)
+
         def calc_A(x, mu, n, P, lam, e1ds):
+            # Mが不明
             M = mu * np.diag(np.ones(n)) - mu**2 * P.T
             A = x @ M @ x.T + lam * (e1ds @ e1ds.T)
             return A
+
+        def calc_B(i, mu, mx, Xs, P, y, Gs):
+            B = mu * Xs[i] @ P @ y
+            for j in range(mx):
+                if i == j:
+                    # なぜ場合分けが必要なのか
+                    continue
+                else:
+                    Rj = Xs[j].T @ Gs[j]
+                    B += mu**2 * Xs[i] @ P.T @ Rj
+            return B
+
+        def update_G(Xs, mu, n, P, lam, mx, Gs, e1ds):
+            for i in range(mx):
+                A = calc_A(Xs[i], mu, n, P, lam, e1ds[i])
+                B = calc_B(i, mu, mx, Xs, P, y, Gs)
+                A_pos, A_neg = separate_mat(A)
+                B_pos, B_neg = separate_mat(B)
+
+                Gs[i] = Gs[i] * np.sqrt(
+                    (B_pos + A_neg @ Gs[i]) / (B_neg + A_pos @ Gs[i])
+                )
+            return Gs
 
         for t in range(self.max_iter):
             Gs_old = [g.copy() for g in self.Gs_]
@@ -78,32 +98,13 @@ class LPI(BaseEstimator, ClassifierMixin):
             Q = calc_Q(y, self.mu, Xs, self.Gs_)
             P = np.linalg.inv(L + (1 + mx * self.mu) * np.diag(np.ones(n)))
             self.Fmat_ = P @ Q
-            for i in range(mx):
-                # fmt: off
-                # TODO: XとX.Tに挟まれた部分が不明
-                As[i] = calc_A(Xs[i], self.mu, n, P, self.lam, e1ds[i])
-                # As[i] = Xs[i] @ (self.mu * np.diag(np.ones(n)) - self.mu**2 * P.T) @ Xs[i].T + \
-                #     self.lam * (e1ds[i] @ e1ds[i].T)
-                # fmt: on
 
-                As_pos[i] = (np.abs(As[i]) + As[i]) / 2
-                As_neg[i] = (np.abs(As[i]) - As[i]) / 2
-            for i in range(mx):
-                Bs[i] = self.mu * Xs[i] @ P @ y
-                for j in range(mx):
-                    if i == j:
-                        continue
-                    else:
-                        Bs[i] += self.mu**2 * Xs[i] @ P.T @ Xs[j].T @ self.Gs_[j]
-                Bs_pos[i] = (np.abs(Bs[i]) + Bs[i]) / 2
-                Bs_neg[i] = (np.abs(Bs[i]) - Bs[i]) / 2
-
-            # fmt: off
-            for i in range(mx):
-                self.Gs_[i] = self.Gs_[i] * np.sqrt((Bs_pos[i] + As_neg[i] @ self.Gs_[i]) / (Bs_neg[i] + As_pos[i] @ self.Gs_[i]))
+            self.Gs_ = update_G(Xs, self.mu, n, P, self.lam, mx, self.Gs_, e1ds)
 
             for i in range(ml):
-                self.alpha_[i, 0] = (1 / np.sum(np.diag((self.Fmat_.T @ Ls[i] @ self.Fmat_)))) ** (1.0 / (self.gam - 1.0))
+                self.alpha_[i, 0] = (
+                    1 / np.sum(np.diag((self.Fmat_.T @ Ls[i] @ self.Fmat_)))
+                ) ** (1.0 / (self.gam - 1.0))
             # fmt: on
             self.alpha_ = self.alpha_ / np.sum(self.alpha_)
 
