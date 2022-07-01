@@ -14,6 +14,16 @@ class LPI(BaseEstimator, ClassifierMixin):
         self.max_iter = max_iter
         self.eps = eps
 
+    def _fit_binary(self, X, y, sample_weight, max_iter):
+        """Fit a binary classifier on X and y"""
+        Gs, alpha, F_mat, n_iter_ = fit_binary()
+
+        self.n_iter_ = n_iter_
+        # update parameter
+        self.Gs_ = Gs
+        self.alpha_ = alpha
+        self.F_mat = F_mat
+
     def fit(self, X, y):
         # fitの後に値が確定する変数はコンストラクタに書かず、
         # fitの中でsaffixに_を付けて宣言する
@@ -30,19 +40,16 @@ class LPI(BaseEstimator, ClassifierMixin):
         mx = len(Xs)
         ml = len(Ls)
         Xs = [x.T for x in Xs]
-        ds = np.array([Xs[i].shape[0] for i in range(mx)])
-        # self.Gs__iにはG_iの転置行列が入る
-        self.Gs_ = [np.random.rand(ds[i], c) for i in range(mx)]
-        e1ds = [np.ones((ds[i], 1)) for i in range(mx)]
+        self.Gs_, self.alpha_, e1ds = prepare_fit_binary(Xs, ml, c)
 
-        self.alpha_ = np.ones((ml, 1)) / ml
-        Gs_old = [np.zeros_like(self.Gs_[i]) for i in range(mx)]
-        As = [np.zeros_like(self.Gs_[i]) for i in range(mx)]
-        As_pos = [np.zeros_like(self.Gs_[i]) for i in range(mx)]
-        As_neg = [np.zeros_like(self.Gs_[i]) for i in range(mx)]
-        Bs = [np.zeros_like(self.Gs_[i]) for i in range(mx)]
-        Bs_pos = [np.zeros_like(self.Gs_[i]) for i in range(mx)]
-        Bs_neg = [np.zeros_like(self.Gs_[i]) for i in range(mx)]
+        Gs_old = zeros_like_numpy_list(self.Gs_)
+        As = zeros_like_numpy_list(self.Gs_)
+        As_pos = zeros_like_numpy_list(self.Gs_)
+        As_neg = zeros_like_numpy_list(self.Gs_)
+        Bs = zeros_like_numpy_list(self.Gs_)
+        Bs_pos = zeros_like_numpy_list(self.Gs_)
+        Bs_neg = zeros_like_numpy_list(self.Gs_)
+
         L = np.zeros((n, n))
         for i in range(ml):
             L += self.alpha_[i, 0] ** self.gam * Ls[i]
@@ -79,9 +86,13 @@ class LPI(BaseEstimator, ClassifierMixin):
                 self.alpha_[i, 0] = (1 / np.sum(np.diag((self.Fmat_.T @ Ls[i] @ self.Fmat_)))) ** (1.0 / (self.gam - 1.0))
             # fmt: on
             self.alpha_ = self.alpha_ / np.sum(self.alpha_)
+
+            # 次の準備
             L = np.zeros((n, n))
             for i in range(ml):
                 L += self.alpha_[i, 0] ** self.gam * Ls[i]
+
+            # diff_Gを計算する
             diff_G = np.zeros((mx, 1))
             for i in range(mx):
                 diff_G[i, 0] = np.linalg.norm(
@@ -90,6 +101,7 @@ class LPI(BaseEstimator, ClassifierMixin):
             if np.mean(diff_G) < self.eps:
                 # 学習を終了させる
                 return self
+
             # ログを出力
             y_pred = self.predict(X, check=False)
             fpr, tpr, _ = roc_curve(np.ravel(y), np.ravel(y_pred))
@@ -116,3 +128,23 @@ class LPI(BaseEstimator, ClassifierMixin):
         # TODO: thresholdを調べておく
         y_pred = y_score
         return y_pred
+
+
+def zeros_like_numpy_list(As):
+    return [np.zeros_like(A) for A in As]
+
+
+def prepare_fit_binary(Xs, ml, c):
+    """initalization for fit_binary.
+    returns Gs, alpha, e1ds
+    """
+    ds = np.array([X.shape[0] for X in Xs])  # 特徴量の個数
+
+    Gs = [np.random.rand(fn, c) for fn in ds]  # self.Gs_にはG_の転置行列が入る
+    alpha = np.ones((ml, 1)) / ml
+    e1ds = [np.ones((fn, 1)) for fn in ds]
+    return (Gs, alpha, e1ds)
+
+
+def fit_binary():
+    pass
