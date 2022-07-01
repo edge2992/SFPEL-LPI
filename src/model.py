@@ -28,100 +28,17 @@ class LPI(BaseEstimator, ClassifierMixin):
         # fitの後に値が確定する変数はコンストラクタに書かず、
         # fitの中でsaffixに_を付けて宣言する
         Xs = X.copy()
-
-        def prepare_Ls(Xs):
-            train_lncRNA_simi = []
-            for x in Xs:
-                train_lncRNA_simi.append(fast_LNC_calculate(x, x.shape[0]))
-            Ls = []
-            for simi in train_lncRNA_simi:
-                Ls.append(np.eye(simi.shape[0]) - simi)
-            return Ls
-
-        # similalityの計算
-        Ls = prepare_Ls(Xs)
-
-        n, c = y.shape
-        mx = len(Xs)
-        ml = len(Ls)
+        Ls = prepare_Ls(Xs)  # similalityの計算
         Xs = [x.T for x in Xs]
-        self.Gs_, self.alpha_, e1ds = prepare_fit_binary(Xs, ml, c)
-
-        def calc_L(Ls, alpha, gam):
-            L = np.zeros_like(Ls[0])
-            for alp, l in zip(alpha, Ls):
-                L += alp**gam * l
-            return L
-
-        def calc_Q(y, mu, Xs, Gs):
-            Q = y.astype("float64")
-            for x, g in zip(Xs, Gs):
-                Q += mu * x.T @ g
-            return Q
-
-        def separate_positive(A):
-            return (np.abs(A) + A) / 2
-
-        def separate_negative(A):
-            return (np.abs(A) - A) / 2
-
-        def separate_mat(A):
-            return separate_positive(A), separate_negative(A)
-
-        def calc_A(x, P, e1ds, mu, lam):
-            # Mが不明
-            n = P.shape[0]
-            M = mu * np.diag(np.ones(n)) - mu**2 * P.T
-            A = x @ M @ x.T + lam * (e1ds @ e1ds.T)
-            return A
-
-        def calc_B(Xs, i, y, P, Gs, mu):
-            B = mu * Xs[i] @ P @ y
-            for j in range(len(Xs)):
-                if i == j:
-                    # なぜ場合分けが必要なのか
-                    continue
-                else:
-                    Rj = Xs[j].T @ Gs[j]
-                    B += mu**2 * Xs[i] @ P.T @ Rj
-            return B
-
-        def update_G(Xs, mu, P, lam, mx, Gs, e1ds):
-            for i in range(mx):
-                A = calc_A(Xs[i], P, e1ds[i], mu, lam)
-                B = calc_B(Xs, i, y, P, Gs, mu)
-                A_pos, A_neg = separate_mat(A)
-                B_pos, B_neg = separate_mat(B)
-
-                Gs[i] = Gs[i] * np.sqrt(
-                    (B_pos + A_neg @ Gs[i]) / (B_neg + A_pos @ Gs[i])
-                )
-            return Gs
-
-        def update_alpha(Fmat, Ls, gam):
-            ml = len(Ls)
-            alpha = np.zeros((ml, 1))
-            for i in range(ml):
-                alpha[i, 0] = (1 / np.sum(np.diag((Fmat.T @ Ls[i] @ Fmat)))) ** (
-                    1.0 / (gam - 1.0)
-                )
-            return alpha / np.sum(alpha)
-
-        def calc_diffG(Gs_new, Gs_old):
-            diff_G = np.zeros((len(Gs_new), 1))
-            for i in range(len(Gs_new)):
-                diff_G[i, 0] = np.linalg.norm(
-                    Gs_new[i] - Gs_old[i], "fro"
-                ) / np.linalg.norm(Gs_old[i], "fro")
-            return np.mean(diff_G)
+        self.Gs_, self.alpha_, e1ds = prepare_fit_binary(Xs, len(Ls), y.shape[1])
 
         for t in range(self.max_iter):
             Gs_old = [g.copy() for g in self.Gs_]
             L = calc_L(Ls, self.alpha_, self.gam)
             Q = calc_Q(y, self.mu, Xs, self.Gs_)
-            P = np.linalg.inv(L + (1 + mx * self.mu) * np.diag(np.ones(n)))
+            P = np.linalg.inv(L + (1 + len(Xs) * self.mu) * np.diag(np.ones(Xs[0].shape[1])))
             self.Fmat_ = P @ Q
-            self.Gs_ = update_G(Xs, self.mu, P, self.lam, mx, self.Gs_, e1ds)
+            self.Gs_ = update_G(Xs, y, self.mu, P, self.lam, self.Gs_, e1ds)
             self.alpha_ = update_alpha(self.Fmat_, Ls, self.gam)
             diff_G = calc_diffG(self.Gs_, Gs_old)
             if diff_G < self.eps:
@@ -170,6 +87,92 @@ def prepare_fit_binary(Xs, ml, c):
     alpha = np.ones((ml, 1)) / ml
     e1ds = [np.ones((fn, 1)) for fn in ds]
     return (Gs, alpha, e1ds)
+
+
+def calc_L(Ls, alpha, gam):
+    L = np.zeros_like(Ls[0])
+    for alp, l in zip(alpha, Ls):
+        L += alp**gam * l
+    return L
+
+
+def calc_Q(y, mu, Xs, Gs):
+    Q = y.astype("float64")
+    for x, g in zip(Xs, Gs):
+        Q += mu * x.T @ g
+    return Q
+
+
+def separate_positive(A):
+    return (np.abs(A) + A) / 2
+
+
+def separate_negative(A):
+    return (np.abs(A) - A) / 2
+
+
+def separate_mat(A):
+    return separate_positive(A), separate_negative(A)
+
+
+def calc_A(x, P, e1ds, mu, lam):
+    # Mが不明
+    n = P.shape[0]
+    M = mu * np.diag(np.ones(n)) - mu**2 * P.T
+    A = x @ M @ x.T + lam * (e1ds @ e1ds.T)
+    return A
+
+
+def calc_B(Xs, i, y, P, Gs, mu):
+    B = mu * Xs[i] @ P @ y
+    for j in range(len(Xs)):
+        if i == j:
+            # なぜ場合分けが必要なのか
+            continue
+        else:
+            Rj = Xs[j].T @ Gs[j]
+            B += mu**2 * Xs[i] @ P.T @ Rj
+    return B
+
+
+def update_G(Xs, y, mu, P, lam, Gs, e1ds):
+    for i in range(len(Xs)):
+        A = calc_A(Xs[i], P, e1ds[i], mu, lam)
+        B = calc_B(Xs, i, y, P, Gs, mu)
+        A_pos, A_neg = separate_mat(A)
+        B_pos, B_neg = separate_mat(B)
+
+        Gs[i] = Gs[i] * np.sqrt((B_pos + A_neg @ Gs[i]) / (B_neg + A_pos @ Gs[i]))
+    return Gs
+
+
+def update_alpha(Fmat, Ls, gam):
+    ml = len(Ls)
+    alpha = np.zeros((ml, 1))
+    for i in range(ml):
+        alpha[i, 0] = (1 / np.sum(np.diag((Fmat.T @ Ls[i] @ Fmat)))) ** (
+            1.0 / (gam - 1.0)
+        )
+    return alpha / np.sum(alpha)
+
+
+def calc_diffG(Gs_new, Gs_old):
+    diff_G = np.zeros((len(Gs_new), 1))
+    for i in range(len(Gs_new)):
+        diff_G[i, 0] = np.linalg.norm(Gs_new[i] - Gs_old[i], "fro") / np.linalg.norm(
+            Gs_old[i], "fro"
+        )
+    return np.mean(diff_G)
+
+
+def prepare_Ls(Xs):
+    train_lncRNA_simi = []
+    for x in Xs:
+        train_lncRNA_simi.append(fast_LNC_calculate(x, x.shape[0]))
+    Ls = []
+    for simi in train_lncRNA_simi:
+        Ls.append(np.eye(simi.shape[0]) - simi)
+    return Ls
 
 
 def fit_binary():
