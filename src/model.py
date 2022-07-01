@@ -27,18 +27,18 @@ class LPI(BaseEstimator, ClassifierMixin):
     def fit(self, X, y):
         # fitの後に値が確定する変数はコンストラクタに書かず、
         # fitの中でsaffixに_を付けて宣言する
-        Xs = X.copy()
-        Ls = prepare_Ls(Xs)  # similalityの計算
-        Xs = [x.T for x in Xs]
-        self.Gs_, self.alpha_, e1ds = prepare_fit_binary(Xs, len(Ls), y.shape[1])
+        Ls = prepare_Ls(X)  # similalityの計算
+        self.Gs_, self.alpha_, e1ds = prepare_fit_binary(X, len(Ls), y.shape[1])
 
         for t in range(self.max_iter):
             Gs_old = [g.copy() for g in self.Gs_]
             L = calc_L(Ls, self.alpha_, self.gam)
-            Q = calc_Q(y, self.mu, Xs, self.Gs_)
-            P = np.linalg.inv(L + (1 + len(Xs) * self.mu) * np.diag(np.ones(Xs[0].shape[1])))
+            Q = calc_Q(y, self.mu, X, self.Gs_)
+            P = np.linalg.inv(
+                L + (1 + len(X) * self.mu) * np.diag(np.ones(X[0].shape[0]))
+            )
             self.Fmat_ = P @ Q
-            self.Gs_ = update_G(Xs, y, self.mu, P, self.lam, self.Gs_, e1ds)
+            self.Gs_ = update_G(X, y, self.mu, P, self.lam, self.Gs_, e1ds)
             self.alpha_ = update_alpha(self.Fmat_, Ls, self.gam)
             diff_G = calc_diffG(self.Gs_, Gs_old)
             if diff_G < self.eps:
@@ -81,7 +81,7 @@ def prepare_fit_binary(Xs, ml, c):
     """initalization for fit_binary.
     returns Gs, alpha, e1ds
     """
-    ds = np.array([X.shape[0] for X in Xs])  # 特徴量の個数
+    ds = np.array([X.shape[1] for X in Xs])  # 特徴量の個数
 
     Gs = [np.random.rand(fn, c) for fn in ds]  # self.Gs_にはG_の転置行列が入る
     alpha = np.ones((ml, 1)) / ml
@@ -96,10 +96,10 @@ def calc_L(Ls, alpha, gam):
     return L
 
 
-def calc_Q(y, mu, Xs, Gs):
+def calc_Q(y, mu, X, Gs):
     Q = y.astype("float64")
-    for x, g in zip(Xs, Gs):
-        Q += mu * x.T @ g
+    for x, g in zip(X, Gs):
+        Q += mu * x @ g
     return Q
 
 
@@ -119,26 +119,26 @@ def calc_A(x, P, e1ds, mu, lam):
     # Mが不明
     n = P.shape[0]
     M = mu * np.diag(np.ones(n)) - mu**2 * P.T
-    A = x @ M @ x.T + lam * (e1ds @ e1ds.T)
+    A = x.T @ M @ x + lam * (e1ds @ e1ds.T)
     return A
 
 
-def calc_B(Xs, i, y, P, Gs, mu):
-    B = mu * Xs[i] @ P @ y
-    for j in range(len(Xs)):
+def calc_B(X, i, y, P, Gs, mu):
+    B = mu * X[i].T @ P @ y
+    for j in range(len(X)):
         if i == j:
             # なぜ場合分けが必要なのか
             continue
         else:
-            Rj = Xs[j].T @ Gs[j]
-            B += mu**2 * Xs[i] @ P.T @ Rj
+            Rj = X[j] @ Gs[j]
+            B += mu**2 * X[i].T @ P.T @ Rj
     return B
 
 
-def update_G(Xs, y, mu, P, lam, Gs, e1ds):
-    for i in range(len(Xs)):
-        A = calc_A(Xs[i], P, e1ds[i], mu, lam)
-        B = calc_B(Xs, i, y, P, Gs, mu)
+def update_G(X, y, mu, P, lam, Gs, e1ds):
+    for i in range(len(X)):
+        A = calc_A(X[i], P, e1ds[i], mu, lam)
+        B = calc_B(X, i, y, P, Gs, mu)
         A_pos, A_neg = separate_mat(A)
         B_pos, B_neg = separate_mat(B)
 
